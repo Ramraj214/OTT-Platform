@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: netflix-deployment
+  labels:
+    app: netflix
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: netflix
+  template:
+    metadata:
+      labels:
+        app: netflix
+    spec:
+      containers:
+        - name: netflix-container
+          image: vijaypatil9261/netflix-clone:01  # Docker image in your Docker Hub repository
+          ports:
+            - containerPort: 80

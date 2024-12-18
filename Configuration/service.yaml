@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: netflix-service
+spec:
+  selector:
+    app: netflix
+  ports:
+    - protocol: TCP
+      port: 8081          # Expose port 8081 externally
+      targetPort: 80      # Redirect to containerPort 80 on the pod
+  type: LoadBalancer

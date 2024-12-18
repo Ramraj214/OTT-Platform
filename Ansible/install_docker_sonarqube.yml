@@ -1,0 +1,49 @@
+---
+  - hosts: all
+    become: yes
+  
+    vars:
+      GITHUB_REPO: 'https://github.com/N4si/DevSecOps-Project.git'
+  
+    tasks:
+      - name: Install Docker
+        yum:
+          name: docker
+          state: present
+  
+      - name: Start and enable Docker service
+        systemd:
+          name: docker
+          enabled: yes
+          state: started
+  
+      - name: Update Yum repositories
+        yum:
+          name: "*"
+          state: latest
+  
+      - name: Install unzip and wget
+        yum:
+          name:
+            - unzip
+            - wget
+          state: present
+  
+      - name: Install Git
+        yum:
+          name: git
+          state: present
+  
+      - name: Clone GitHub Repository
+        git:
+          repo: "{{ GITHUB_REPO }}"
+          dest: /home/ec2-user/DevSecOps-Project
+          version: main
+          force: yes
+        become_user: ec2-user
+  
+      - name: Install Trivy
+        command: rpm -ivh https://github.com/aquasecurity/trivy/releases/download/v0.18.3/trivy_0.18.3_Linux-64bit.rpm
+        args:
+          creates: /usr/local/bin/trivy  # Prevents reinstallation if Trivy is already installed
+  

@@ -1,0 +1,94 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_DEFAULT_REGION = 'eu-north-1'
+        GITHUB_REPO = 'https://github.com/Vijay09261/NetflixClone.git'
+        AWS_ACCESS_KEY_ID = credentials('b8e9ba93-96da-4f8c-a6ef-071cbf986078')
+        AWS_SECRET_ACCESS_KEY = credentials('b8e9ba93-96da-4f8c-a6ef-071cbf986078')
+        KUBECONFIG = '/var/lib/jenkins/.kube/config'  // Ensure Jenkins has access to this file
+    }
+
+    stages {
+        stage('Install AWS CLI') {
+            steps {
+                script {
+                    // Install AWS CLI if not already installed
+                    sh '''
+                        if ! command -v aws &> /dev/null; then
+                            echo "AWS CLI not found, installing..."
+                            sudo apt-get update
+                            sudo apt-get install -y awscli
+                        else
+                            echo "AWS CLI is already installed."
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Install kubectl') {
+            steps {
+                script {
+                    // Install kubectl if not already installed
+                    sh '''
+                        if ! command -v kubectl &> /dev/null; then
+                            echo "kubectl not found, installing..."
+                            curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+                            chmod +x ./kubectl
+                            sudo mv ./kubectl /usr/local/bin/kubectl
+                        else
+                            echo "kubectl is already installed."
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Configure kubectl for EKS Access') {
+            steps {
+                script {
+                    // Update kubeconfig for EKS access
+                    sh '''
+                        aws eks update-kubeconfig --region ${AWS_DEFAULT_REGION} --name my_eks_cluster
+                    '''
+                }
+            }
+        }
+
+        stage('Clone Repository') {
+            steps {
+                git url: "${GITHUB_REPO}", branch: 'main'
+            }
+        }
+
+        stage('Verify Configuration Files') {
+            steps {
+                script {
+                    // Check if the YAML files exist in the Configuration directory
+                    sh 'ls -R /var/lib/jenkins/workspace/Deployment_pipe/Configuration'
+                }
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                script {
+                    // Deploy the Kubernetes deployment and service YAML files
+                    echo 'Deploying Kubernetes resources to EKS'
+                    sh 'kubectl apply -f /var/lib/jenkins/workspace/Deployment_pipe/Configuration/deployment.yaml'
+                    sh 'kubectl apply -f /var/lib/jenkins/workspace/Deployment_pipe/Configuration/service.yaml'
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Deployment to EKS was successful!'
+        }
+        failure {
+            echo 'Deployment to EKS failed.'
+        }
+    }
+}

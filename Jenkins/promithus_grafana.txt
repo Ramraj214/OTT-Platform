@@ -1,0 +1,116 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_DEFAULT_REGION = 'eu-north-1'
+        AWS_ACCESS_KEY_ID = credentials('b8e9ba93-96da-4f8c-a6ef-071cbf986078')
+        AWS_SECRET_ACCESS_KEY = credentials('b8e9ba93-96da-4f8c-a6ef-071cbf986078')
+        KUBECONFIG = '/var/lib/jenkins/.kube/config'
+    }
+
+    stages {
+        stage('Install AWS CLI') {
+            steps {
+                script {
+                    sh '''
+                        if ! command -v aws &> /dev/null; then
+                            echo "Installing AWS CLI..."
+                            sudo apt-get update
+                            sudo apt-get install -y awscli
+                        else
+                            echo "AWS CLI is already installed."
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Install kubectl') {
+            steps {
+                script {
+                    sh '''
+                        if ! command -v kubectl &> /dev/null; then
+                            echo "Installing kubectl..."
+                            curl -LO https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl
+                            chmod +x ./kubectl
+                            sudo mv ./kubectl /usr/local/bin/kubectl
+                        else
+                            echo "kubectl is already installed."
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Install Helm') {
+            steps {
+                script {
+                    sh '''
+                        if ! command -v helm &> /dev/null; then
+                            echo "Installing Helm..."
+                            curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+                            chmod +x get_helm.sh
+                            ./get_helm.sh
+                        else
+                            echo "Helm is already installed."
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Configure kubectl for EKS Access') {
+            steps {
+                script {
+                    sh '''
+                        aws eks update-kubeconfig --region ${AWS_DEFAULT_REGION} --name my_eks_cluster
+                    '''
+                }
+            }
+        }
+
+        stage('Add Helm Repositories') {
+            steps {
+                script {
+                    sh '''
+                        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+                        helm repo add grafana https://grafana.github.io/helm-charts
+                        helm repo update
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Prometheus with EKS Monitoring') {
+            steps {
+                script {
+                    sh '''
+                        helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+                            --namespace monitoring --create-namespace \
+                            --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+                            --set grafana.adminPassword=admin
+                    '''
+                }
+            }
+        }
+
+        stage('Expose Grafana Service') {
+            steps {
+                script {
+                    sh '''
+                        kubectl expose service prometheus-grafana --namespace monitoring --type=LoadBalancer --name=grafana-lb --port=80 --target-port=3000
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Prometheus and Grafana were successfully deployed with EKS monitoring!'
+        }
+        failure {
+            echo 'Prometheus or Grafana deployment failed.'
+        }
+    }
+}

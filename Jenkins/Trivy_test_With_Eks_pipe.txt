@@ -1,0 +1,108 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_DEFAULT_REGION = 'ap-south-1'
+        GITHUB_REPO = 'https://github.com/Vijay09261/NetflixClone.git'
+        AWS_ACCESS_KEY_ID = credentials('b8e9ba93-96da-4f8c-a6ef-071cbf986078')
+        AWS_SECRET_ACCESS_KEY = credentials('b8e9ba93-96da-4f8c-a6ef-071cbf986078')
+        SSH_PRIVATE_KEY_ID = 'eu_north_ssh_key'
+    }
+
+    stages {
+        stage('Clone Repository on Jenkins Instance') {
+            steps {
+                git url: "${GITHUB_REPO}", branch: 'main'
+            }
+        }
+
+        stage('Terraform Actions') {
+            steps {
+                script {
+                    sh '''
+                        cd terraform
+                        terraform init
+                        terraform plan -out=tfplan
+                        terraform apply -auto-approve tfplan
+                    '''
+                    env.HOST_INSTANCE_IP = sh(script: 'cd terraform && terraform output -raw host_instance_ip', returnStdout: true).trim()
+                    echo "Host Instance IP: ${env.HOST_INSTANCE_IP}"
+                }
+            }
+        }
+
+        stage('Generate host.ini for Ansible') {
+            steps {
+                script {
+                    writeFile file: 'host.ini', text: """
+                    [host_instance]
+                    ${env.HOST_INSTANCE_IP} ansible_ssh_user=ec2-user ansible_ssh_private_key_file=/home/ec2-user/.ssh/eu_north.pem
+                    """
+                }
+            }
+        }
+
+        stage('Add Host Key to known_hosts') {
+            steps {
+                script {
+                    sh '''
+                        mkdir -p /var/lib/jenkins/.ssh
+                        ssh-keyscan -H ${HOST_INSTANCE_IP} >> /var/lib/jenkins/.ssh/known_hosts
+                    '''
+                }
+            }
+        }
+
+        stage('Install Docker and Trivy using Ansible') {
+            steps {
+                script {
+                    sshagent(['eu_north_ssh_key']) {
+                        sh '''
+                            cd Ansible
+                            ansible-playbook install_docker_sonarqube.yml -i ../host.ini
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image on Host') {
+            steps {
+                script {
+                    sshagent(['eu_north_ssh_key']) {
+                        sh '''
+                            ssh ec2-user@${HOST_INSTANCE_IP} '
+                            cd /home/ec2-user/DevSecOps-Project  # Adjust path if necessary
+                            sudo chmod 777 /var/run/docker.sock
+                            docker build -t netflix_clone .
+                            '
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Scan Docker Image with Trivy') {
+            steps {
+                script {
+                    sshagent(['eu_north_ssh_key']) {
+                        sh '''
+                            ssh ec2-user@${HOST_INSTANCE_IP} '
+                            trivy image netflix_clone
+                            '
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Docker image build and scan were successful!'
+        }
+        failure {
+            echo 'Docker image build or scan failed.'
+        }
+    }
+}
